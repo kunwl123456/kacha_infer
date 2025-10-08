@@ -69,6 +69,7 @@ void CUDADeviceAllocator::release(void* ptr) const {
   if (cuda_buffers_map_.empty()) {
     return;
   }
+  //查看是否分配显存超出数量
   cudaError_t state = cudaSuccess;
   for (auto& it : cuda_buffers_map_) {
     if (no_busy_cnt_[it.first] > 1024 * 1024 * 1024) {
