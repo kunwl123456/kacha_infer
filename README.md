@@ -15,6 +15,5 @@
 - TinyLLama分词器 https://huggingface.co/yahma/llama-7b-hf/blob/main/tokenizer.model
 
 3. Qwen2.5/LLama
-   
-   请参考本项目配套课程，课程参加方式请看本文开头。
+4. Qwen3.0
 
