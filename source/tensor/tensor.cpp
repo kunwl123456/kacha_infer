@@ -1,299 +1,234 @@
-//
-// Created by fss on 22-11-12.
-//
-
-#include "data/tensor.h"
+#include "include/tensor/tensor.h"
+#include <cuda_device_runtime_api.h>
+#include <cuda_runtime.h>
 #include <glog/logging.h>
-#include <memory>
 #include <numeric>
 
-namespace kuiper_infer {
-Tensor<float>::Tensor(uint32_t channels, uint32_t rows, uint32_t cols) {
-  data_ = arma::fcube(rows, cols, channels);
-  if (channels == 1 && rows == 1) {
-    this->raw_shapes_ = std::vector<uint32_t>{cols};
-  } else if (channels == 1) {
-    this->raw_shapes_ = std::vector<uint32_t>{rows, cols};
-  } else {
-    this->raw_shapes_ = std::vector<uint32_t>{channels, rows, cols};
-  }
-}
 
-Tensor<float>::Tensor(uint32_t size) {
-  data_ = arma::fcube(1, size, 1);
-  this->raw_shapes_ = std::vector<uint32_t>{size};
-}
 
-Tensor<float>::Tensor(uint32_t rows, uint32_t cols) {
-  data_ = arma::fcube(rows, cols, 1);
-  this->raw_shapes_ = std::vector<uint32_t>{rows, cols};
-}
-
-Tensor<float>::Tensor(const std::vector<uint32_t>& shapes) {
-  CHECK(!shapes.empty() && shapes.size() <= 3);
-
-  uint32_t remaining = 3 - shapes.size();
-  std::vector<uint32_t> shapes_(3, 1);
-  std::copy(shapes.begin(), shapes.end(), shapes_.begin() + remaining);
-
-  uint32_t channels = shapes_.at(0);
-  uint32_t rows = shapes_.at(1);
-  uint32_t cols = shapes_.at(2);
-
-  data_ = arma::fcube(rows, cols, channels);
-  if (channels == 1 && rows == 1) {
-    this->raw_shapes_ = std::vector<uint32_t>{cols};
-  } else if (channels == 1) {
-    this->raw_shapes_ = std::vector<uint32_t>{rows, cols};
-  } else {
-    this->raw_shapes_ = std::vector<uint32_t>{channels, rows, cols};
-  }
-}
-
-Tensor<float>::Tensor(const Tensor& tensor) {
-  if (this != &tensor) {
-    this->data_ = tensor.data_;
-    this->raw_shapes_ = tensor.raw_shapes_;
-  }
-}
-
-Tensor<float>::Tensor(Tensor<float>&& tensor) noexcept {
-  if (this != &tensor) {
-    this->data_ = std::move(tensor.data_);
-    this->raw_shapes_ = tensor.raw_shapes_;
-  }
-}
-
-Tensor<float>& Tensor<float>::operator=(Tensor<float>&& tensor) noexcept {
-  if (this != &tensor) {
-    this->data_ = std::move(tensor.data_);
-    this->raw_shapes_ = tensor.raw_shapes_;
-  }
-  return *this;
-}
-
-Tensor<float>& Tensor<float>::operator=(const Tensor& tensor) {
-  if (this != &tensor) {
-    this->data_ = tensor.data_;
-    this->raw_shapes_ = tensor.raw_shapes_;
-  }
-  return *this;
-}
-
-uint32_t Tensor<float>::rows() const {
-  CHECK(!this->data_.empty());
-  return this->data_.n_rows;
-}
-
-uint32_t Tensor<float>::cols() const {
-  CHECK(!this->data_.empty());
-  return this->data_.n_cols;
-}
-
-uint32_t Tensor<float>::channels() const {
-  CHECK(!this->data_.empty());
-  return this->data_.n_slices;
-}
-
-uint32_t Tensor<float>::size() const {
-  CHECK(!this->data_.empty());
-  return this->data_.size();
-}
-
-void Tensor<float>::set_data(const arma::fcube& data) {
-  CHECK(data.n_rows == this->data_.n_rows)
-      << data.n_rows << " != " << this->data_.n_rows;
-  CHECK(data.n_cols == this->data_.n_cols)
-      << data.n_cols << " != " << this->data_.n_cols;
-  CHECK(data.n_slices == this->data_.n_slices)
-      << data.n_slices << " != " << this->data_.n_slices;
-  this->data_ = data;
-}
-
-bool Tensor<float>::empty() const { return this->data_.empty(); }
-
-float Tensor<float>::index(uint32_t offset) const {
-  CHECK(offset < this->data_.size()) << "Tensor index out of bound!";
-  return this->data_.at(offset);
-}
-
-float& Tensor<float>::index(uint32_t offset) {
-  CHECK(offset < this->data_.size()) << "Tensor index out of bound!";
-  return this->data_.at(offset);
-}
-
-std::vector<uint32_t> Tensor<float>::shapes() const {
-  CHECK(!this->data_.empty());
-  return {this->channels(), this->rows(), this->cols()};
-}
-
-arma::fcube& Tensor<float>::data() { return this->data_; }
-
-const arma::fcube& Tensor<float>::data() const { return this->data_; }
-
-arma::fmat& Tensor<float>::slice(uint32_t channel) {
-  CHECK_LT(channel, this->channels());
-  return this->data_.slice(channel);
-}
-
-const arma::fmat& Tensor<float>::slice(uint32_t channel) const {
-  CHECK_LT(channel, this->channels());
-  return this->data_.slice(channel);
-}
-
-float Tensor<float>::at(uint32_t channel, uint32_t row, uint32_t col) const {
-  CHECK_LT(row, this->rows());
-  CHECK_LT(col, this->cols());
-  CHECK_LT(channel, this->channels());
-  return this->data_.at(row, col, channel);
-}
-
-float& Tensor<float>::at(uint32_t channel, uint32_t row, uint32_t col) {
-  CHECK_LT(row, this->rows());
-  CHECK_LT(col, this->cols());
-  CHECK_LT(channel, this->channels());
-  return this->data_.at(row, col, channel);
-}
-
-void Tensor<float>::Padding(const std::vector<uint32_t>& pads,
-                            float padding_value) {
-  CHECK(!this->data_.empty());
-  CHECK_EQ(pads.size(), 4);
-  // 四周填充的维度
-  uint32_t pad_rows1 = pads.at(0);  // up
-  uint32_t pad_rows2 = pads.at(1);  // bottom
-  uint32_t pad_cols1 = pads.at(2);  // left
-  uint32_t pad_cols2 = pads.at(3);  // right
-
-  // 请补充代码
-}
-
-void Tensor<float>::Fill(float value) {
-  CHECK(!this->data_.empty());
-  this->data_.fill(value);
-}
-
-void Tensor<float>::Fill(const std::vector<float>& values, bool row_major) {
-  CHECK(!this->data_.empty());
-  const uint32_t total_elems = this->data_.size();
-  CHECK_EQ(values.size(), total_elems);
-  if (row_major) {
-    const uint32_t rows = this->rows();
-    const uint32_t cols = this->cols();
-    const uint32_t planes = rows * cols;
-    const uint32_t channels = this->data_.n_slices;
-
-    for (uint32_t i = 0; i < channels; ++i) {
-      auto& channel_data = this->data_.slice(i);
-      const arma::fmat& channel_data_t =
-          arma::fmat(values.data() + i * planes, this->cols(), this->rows());
-      channel_data = channel_data_t.t();
+namespace tensor {
+  //使用 std::accumulate 和 std::multiplies<>() 将范围内的所有数字相乘
+  //例如：如果维度是 [2, 3, 4]，结果就是 2 * 3 * 4 = 24
+  template <typename T,typename Tp>
+  static size_t reduce_dimension(T begin,T ebd,Tp init){
+    if(begin >= end){
+      return 0;
     }
-  } else {
-    std::copy(values.begin(), values.end(), this->data_.memptr());
-  }
-}
-
-void Tensor<float>::Show() {
-  for (uint32_t i = 0; i < this->channels(); ++i) {
-    LOG(INFO) << "Channel: " << i;
-    LOG(INFO) << "\n" << this->data_.slice(i);
-  }
-}
-
-void Tensor<float>::Flatten(bool row_major) {
-  CHECK(!this->data_.empty());
-  // 请补充代码
-}
-
-void Tensor<float>::Rand() {
-  CHECK(!this->data_.empty());
-  this->data_.randn();
-}
-
-void Tensor<float>::Ones() {
-  CHECK(!this->data_.empty());
-  this->Fill(1.f);
-}
-
-void Tensor<float>::Transform(const std::function<float(float)>& filter) {
-  CHECK(!this->data_.empty());
-  this->data_.transform(filter);
-}
-
-const std::vector<uint32_t>& Tensor<float>::raw_shapes() const {
-  CHECK(!this->raw_shapes_.empty());
-  CHECK_LE(this->raw_shapes_.size(), 3);
-  CHECK_GE(this->raw_shapes_.size(), 1);
-  return this->raw_shapes_;
-}
-
-void Tensor<float>::Reshape(const std::vector<uint32_t>& shapes,
-                            bool row_major) {
-  CHECK(!this->data_.empty());
-  CHECK(!shapes.empty());
-  const uint32_t origin_size = this->size();
-  const uint32_t current_size =
-      std::accumulate(shapes.begin(), shapes.end(), 1, std::multiplies());
-  CHECK(shapes.size() <= 3);
-  CHECK(current_size == origin_size);
-
-  std::vector<float> values;
-  if (row_major) {
-    values = this->values(true);
-  }
-  if (shapes.size() == 3) {
-    this->data_.reshape(shapes.at(1), shapes.at(2), shapes.at(0));
-    this->raw_shapes_ = {shapes.at(0), shapes.at(1), shapes.at(2)};
-  } else if (shapes.size() == 2) {
-    this->data_.reshape(shapes.at(0), shapes.at(1), 1);
-    this->raw_shapes_ = {shapes.at(0), shapes.at(1)};
-  } else {
-    this->data_.reshape(1, shapes.at(0), 1);
-    this->raw_shapes_ = {shapes.at(0)};
+    size_t size = std::accumulate(begin,end,init,std::multiplies<>());
+    return size;
   }
 
-  if (row_major) {
-    this->Fill(values, true);
-  }
-}
-
-float* Tensor<float>::raw_ptr() {
-  CHECK(!this->data_.empty());
-  return this->data_.memptr();
-}
-
-float* Tensor<float>::raw_ptr(uint32_t offset) {
-  const uint32_t size = this->size();
-  CHECK(!this->data_.empty());
-  CHECK_LT(offset, size);
-  return this->data_.memptr() + offset;
-}
-
-std::vector<float> Tensor<float>::values(bool row_major) {
-  CHECK_EQ(this->data_.empty(), false);
-  std::vector<float> values(this->data_.size());
-
-  if (!row_major) {
-    std::copy(this->data_.mem, this->data_.mem + this->data_.size(),
-              values.begin());
-  } else {
-    uint32_t index = 0;
-    for (uint32_t c = 0; c < this->data_.n_slices; ++c) {
-      const arma::fmat& channel = this->data_.slice(c).t();
-      std::copy(channel.begin(), channel.end(), values.begin() + index);
-      index += channel.size();
+  static size_t data_type_size(base::DataType data_type) {
+  switch (data_type) {
+    case base::DataType::kDataTypeFp32: {
+      return 4;
     }
-    CHECK_EQ(index, values.size());
+    case base::DataType::kDataTypeInt8: {
+      return 1;
+    }
+    case base::DataType::kDataTypeInt32: {
+      return 4;
+    }
+    default: {
+      LOG(FATAL) << "Unknown data type size for " << int(data_type);
+      return 0;
+    }
   }
-  return values;
 }
 
-float* Tensor<float>::matrix_raw_ptr(uint32_t index) {
-  CHECK_LT(index, this->channels());
-  uint32_t offset = index * this->rows() * this->cols();
-  CHECK_LE(offset, this->size());
-  float* mem_ptr = this->raw_ptr() + offset;
-  return mem_ptr;
+
+//  construct func
+  Tensor::Tensor(base::DataType data_type, int32_t dim0, bool need_alloc,
+              std::shared_ptr<base::DeviceAllocator> alloc, void* ptr)
+  : data_type_(data_type) {
+  dims_.push_back(dim0);
+  size_ = dim0;
+  if (need_alloc && alloc) {
+  allocate(alloc);
+  } else {
+  if (ptr != nullptr) {
+    CHECK(need_alloc == false)
+        << "The need_alloc is is true when ptr parameter is not a null pointer.";
+    init_buffer(alloc, data_type_, need_alloc, ptr);
+  }
+  }
+  }
+
+  Tensor::Tensor(base::DataType data_type, int32_t dim0, int32_t dim1, bool need_alloc,
+              std::shared_ptr<base::DeviceAllocator> alloc, void* ptr)
+  : data_type_(data_type) {
+    dims_.push_back(dim0);
+    dims_.push_back(dim1);
+    size_ = dim0 * dim1;
+    if (need_alloc && alloc) {
+    allocate(alloc);
+    } else {
+    init_buffer(alloc, data_type_, need_alloc, ptr);
+    }
+  }
+
+  Tensor::Tensor(base::DataType data_type, std::vector<int32_t> dims, bool need_alloc,
+               std::shared_ptr<base::DeviceAllocator> alloc, void* ptr)
+    : dims_(std::move(dims)), data_type_(data_type) {
+  size_ = reduce_dimension(dims_.begin(), dims_.end(), 1);
+  if (need_alloc && alloc) {
+    allocate(alloc);
+  } else {
+    init_buffer(alloc, data_type_, need_alloc, ptr);
+  }
 }
-}  // namespace kuiper_infer
+
+void Tensor::reset(base::DataType data_type, const std::vector<int32_t>& dims) {
+  this->data_type_ = data_type;
+  this->dims_ = dims;
+  this->size_ = reduce_dimension(dims.begin(), dims.end(), 1);
+  this->buffer_ = nullptr;
+}
+
+// dims // size
+
+int32_t Tensor::get_dim(int32_t idx) const {
+  CHECK_GE(idx, 0);
+  CHECK_LT(idx, this->dims_.size());
+  return this->dims_.at(idx);
+}
+
+base::DeviceType Tensor::device_type() const {
+  if (!buffer_) {
+    return base::DeviceType::kDeviceUnknown;
+  }
+  return buffer_->device_type();
+}
+
+const std::vector<int32_t>& Tensor::dims() const { return this->dims_; }
+
+void Tensor::set_device_type(base::DeviceType device_type) const {
+  if (buffer_) {
+    buffer_->set_device_type(device_type);
+  }
+}
+
+int32_t Tensor::dims_size() const { return static_cast<int32_t>(dims_.size()); }
+
+size_t Tensor::byte_size() const { return this->size() * DataTypeSize(data_type_); }
+
+bool Tensor::is_empty() const {
+  return size_ == 0 || buffer_ == nullptr || buffer_->ptr() == nullptr;
+}
+
+ // memory
+bool Tensor::assign(std::shared_ptr<base::Buffer> buffer) {
+  if (!buffer) {
+    LOG(ERROR) << "The buffer parameter in the assign function is null pointer!";
+    return false;
+  }
+  if (buffer_) {
+    if (buffer_->device_type() != buffer->device_type()) {
+      LOG(ERROR) << "The device type of the new buffer is different from the original one.";
+    }
+  }
+
+  size_t byte_size = this->byte_size();
+  if (byte_size > buffer->byte_size()) {
+    LOG(ERROR) << "The size of buffer is too small for the tensor!";
+    return false;
+  }
+  buffer_ = buffer;
+  return true;
+}
+
+
+void Tensor::to_cuda(cudaStream_t stream) {
+  CHECK_NE(buffer_, nullptr);
+  const base::DeviceType device_type = this->device_type();
+  if (device_type == base::DeviceType::kDeviceUnknown) {
+    LOG(ERROR) << "The device type of the tensor is unknown.";
+  } else if (device_type == base::DeviceType::kDeviceCPU) {
+    size_t byte_size = this->byte_size();
+    auto cu_alloc = base::CUDADeviceAllocatorFactory::get_instance();
+    auto cu_buffer = std::make_shared<base::Buffer>(byte_size, cu_alloc);
+    cu_alloc->memcpy(buffer_->ptr(), cu_buffer->ptr(), byte_size, base::MemcpyKind::kMemcpyCPU2CUDA,
+                     stream);
+    this->buffer_ = cu_buffer;
+  } else {
+    LOG(INFO) << "The device type of the tensor is already cuda.";
+  }
+}
+
+
+void Tensor::to_cpu() {
+  CHECK_NE(buffer_, nullptr);
+  const base::DeviceType device_type = this->device_type();
+
+  if (device_type == base::DeviceType::kDeviceUnknown) {
+    LOG(ERROR) << "The device type of the tensor is unknown.";
+  } else if (device_type == base::DeviceType::kDeviceCUDA) {
+    size_t byte_size = this->byte_size();
+    auto cpu_alloc = base::CPUDeviceAllocatorFactory::get_instance();
+    auto cpu_buffer = std::make_shared<base::Buffer>(byte_size, cpu_alloc);
+    cpu_alloc->memcpy(buffer_->ptr(), cpu_buffer->ptr(), byte_size,
+                      base::MemcpyKind::kMemcpyCUDA2CPU);
+    this->buffer_ = cpu_buffer;
+  } else {
+    LOG(INFO) << "The device type of the tensor is already cpu.";
+  }
+}
+
+size_t Tensor::size() const { return this->size_; }
+
+
+
+bool Tensor::allocate(std::shared_ptr<base::DeviceAllocator> allocator, bool need_realloc) {
+  if (!allocator) {
+    LOG(ERROR) << "The allocator parameter in the allocate function is null "
+                  "pointer!";
+    return false;
+  }
+
+  size_t byte_size = this->byte_size();
+  if (!byte_size) {
+    LOG(ERROR) << "The byte_size parameter in the allocate function is equal to zero!";
+    return false;
+  }
+
+  if (buffer_ && byte_size <= buffer_->byte_size()) {
+    if (!need_realloc) {
+      return true;
+    }
+  }
+
+  buffer_ = std::make_shared<base::Buffer>(byte_size, allocator, nullptr);
+  if (!buffer_->ptr()) {
+    LOG(ERROR) << "The memory allocated is a null pointer!";
+    return false;
+  }
+  return true;
+}
+  
+  void Tensor::init_buffer(std::shared_ptr<base::DeviceAllocator> alloc, base::DataType data_type,
+                         bool need_alloc, void* ptr) {
+    if (!alloc && !need_alloc) {
+      std::shared_ptr<base::Buffer> buffer =
+          std::make_shared<base::Buffer>(data_type_size(data_type) * size_, nullptr, ptr, true);
+      this->buffer_ = buffer;
+    } else {
+      allocate(alloc, true);
+    }
+}
+
+Tensor Tensor::clone() const {
+  Tensor new_tensor = *this;
+  size_t byte_size = this->byte_size();
+
+  auto allocator = buffer_->allocator();
+  new_tensor.buffer_ = std::make_shared<base::Buffer>(byte_size, allocator);
+  new_tensor.buffer_->copy_from(buffer_.get());
+  return new_tensor;
+}
+
+}
+
+
+
+
+
