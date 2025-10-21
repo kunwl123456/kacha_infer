@@ -30,3 +30,14 @@
 
 ## 3.10/20/2025
 1)完善llm tensor相关代码
+
+## 4.10/21/2025
+1)RMSNorm算子的CUDA实现
+RMSNorm算子的计算公式:
+其中d是输入的x向量的维度，w是权重需要在计算1，2两式完成时对原结果进行逐点相乘。x是算子计算的输入，y是算子计算的输出。
+https://l0kzvikuq0w.feishu.cn/docx/BXtyd0xGHoYWFgxrPDkcw2HXnxb#share-LL6PdBycXo9KALxMIl6cowksnce
+2)RMSNorm算子测试样例
+案例1	480	1D	❌	基础功能
+案例2	4×1024	2D	❌	多维 + in-place
+案例3	32	1D	✅	异步执行
+案例4	72,480	1D	✅	大规模数据
